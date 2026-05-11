@@ -6,11 +6,11 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { connectMongo } from "./lib/mongodb";
+import { seedWhitelist } from "./lib/seed";
 
 const app: Express = express();
 
-connectMongo();
+seedWhitelist();
 
 app.use(
   pinoHttp({

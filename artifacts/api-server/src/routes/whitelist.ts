@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { requireAuth, requireAdmin } from "../lib/auth";
-import { WhitelistedUser } from "../models/WhitelistedUser";
-import { isMongoConnected } from "../lib/mongodb";
+import { requireAdmin } from "../lib/auth";
+import { db, whitelistedUsersTable } from "@workspace/db";
+import { eq, ilike, desc } from "drizzle-orm";
 
 const router = Router();
 
@@ -13,16 +13,16 @@ router.get("/whitelist/check", async (req, res) => {
       res.json({ allowed: false, reason: "unauthenticated" });
       return;
     }
-    if (!isMongoConnected()) {
-      res.json({ allowed: true, reason: "mongo_unavailable" });
-      return;
-    }
     const email = (req.query.email as string | undefined)?.toLowerCase().trim();
     if (!email) {
       res.json({ allowed: true, reason: "no_email" });
       return;
     }
-    const entry = await WhitelistedUser.findOne({ email }).maxTimeMS(3000);
+    const [entry] = await db
+      .select()
+      .from(whitelistedUsersTable)
+      .where(eq(whitelistedUsersTable.email, email))
+      .limit(1);
     res.json({ allowed: !!entry });
   } catch (err) {
     console.error("[whitelist.check]", err instanceof Error ? err.message : err);
@@ -31,14 +31,20 @@ router.get("/whitelist/check", async (req, res) => {
 });
 
 router.get("/whitelist", requireAdmin, async (req, res) => {
-  if (!isMongoConnected()) {
-    res.status(503).json({ error: "MongoDB not connected — whitelist unavailable" });
-    return;
-  }
   try {
     const { q } = req.query as Record<string, string>;
-    const filter = q ? { email: { $regex: q, $options: "i" } } : {};
-    const users = await WhitelistedUser.find(filter).sort({ createdAt: -1 }).limit(200).maxTimeMS(5000);
+    const users = q
+      ? await db
+          .select()
+          .from(whitelistedUsersTable)
+          .where(ilike(whitelistedUsersTable.email, `%${q}%`))
+          .orderBy(desc(whitelistedUsersTable.createdAt))
+          .limit(200)
+      : await db
+          .select()
+          .from(whitelistedUsersTable)
+          .orderBy(desc(whitelistedUsersTable.createdAt))
+          .limit(200);
     res.json(users);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
@@ -47,21 +53,21 @@ router.get("/whitelist", requireAdmin, async (req, res) => {
 });
 
 router.post("/whitelist", requireAdmin, async (req, res) => {
-  if (!isMongoConnected()) {
-    res.status(503).json({ error: "MongoDB not connected" });
-    return;
-  }
   try {
     const { email, note } = req.body as { email: string; note?: string };
     if (!email?.trim()) {
       res.status(400).json({ error: "email is required" });
       return;
     }
-    const entry = await WhitelistedUser.findOneAndUpdate(
-      { email: email.toLowerCase().trim() },
-      { email: email.toLowerCase().trim(), addedBy: req.userId, note: note ?? "" },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
+    const normalized = email.toLowerCase().trim();
+    const [entry] = await db
+      .insert(whitelistedUsersTable)
+      .values({ email: normalized, addedBy: req.userId, note: note ?? "" })
+      .onConflictDoUpdate({
+        target: whitelistedUsersTable.email,
+        set: { addedBy: req.userId, note: note ?? "", updatedAt: new Date() },
+      })
+      .returning();
     res.status(201).json(entry);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
@@ -70,12 +76,10 @@ router.post("/whitelist", requireAdmin, async (req, res) => {
 });
 
 router.delete("/whitelist/:id", requireAdmin, async (req, res) => {
-  if (!isMongoConnected()) {
-    res.status(503).json({ error: "MongoDB not connected" });
-    return;
-  }
   try {
-    await WhitelistedUser.findByIdAndDelete(req.params.id);
+    await db
+      .delete(whitelistedUsersTable)
+      .where(eq(whitelistedUsersTable.id, req.params.id));
     res.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";

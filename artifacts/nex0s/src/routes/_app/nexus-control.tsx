@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Shield, Plus, Trash2, Search, ShieldCheck, Loader2, Users, ShieldX,
-  CheckCircle2, XCircle, RefreshCw,
+  CheckCircle2, XCircle, RefreshCw, Database,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,18 +43,18 @@ export default function NexusControl() {
   const [newNote, setNewNote] = useState("");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; email: string } | null>(null);
 
-  const mongoStatus = useQuery({
-    queryKey: ["mongo-status"],
+  const dbStatus = useQuery({
+    queryKey: ["db-status"],
     queryFn: () => api.getMongoStatus(),
     enabled: isAdmin,
-    refetchInterval: 5_000,
+    refetchInterval: 10_000,
     retry: false,
   });
 
   const listQ = useQuery({
     queryKey: ["whitelist", search],
     queryFn: () => api.listWhitelist(search || undefined),
-    enabled: isAdmin && (mongoStatus.data?.connected ?? false),
+    enabled: isAdmin,
     refetchInterval: 15_000,
   });
 
@@ -85,8 +85,8 @@ export default function NexusControl() {
     addMutation.mutate();
   };
 
-  const connected = mongoStatus.data?.connected ?? false;
-  const mongoLabel = mongoStatus.data?.label ?? "checking…";
+  const connected = dbStatus.data?.connected ?? false;
+  const dbLabel = dbStatus.data?.label ?? "checking…";
   const entries = listQ.data ?? [];
 
   return (
@@ -107,16 +107,16 @@ export default function NexusControl() {
         <Card className="glass">
           <CardContent className="p-4 flex items-center gap-3">
             <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${connected ? "bg-success/10 border border-success/30" : "bg-destructive/10 border border-destructive/30"}`}>
-              {mongoStatus.isLoading
+              {dbStatus.isLoading
                 ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 : connected
                   ? <CheckCircle2 className="h-5 w-5 text-success" />
                   : <XCircle className="h-5 w-5 text-destructive" />}
             </div>
             <div>
-              <div className="text-xs uppercase tracking-widest text-muted-foreground">MongoDB Atlas</div>
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">PostgreSQL</div>
               <div className={`font-bold capitalize ${connected ? "text-success" : "text-destructive"}`}>
-                {mongoStatus.isLoading ? "Checking…" : mongoLabel}
+                {dbStatus.isLoading ? "Checking…" : dbLabel}
               </div>
             </div>
           </CardContent>
@@ -147,20 +147,20 @@ export default function NexusControl() {
         </Card>
       </div>
 
-      {/* MongoDB offline banner */}
-      {!mongoStatus.isLoading && !connected && (
+      {/* DB offline banner */}
+      {!dbStatus.isLoading && !connected && (
         <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
           <XCircle className="h-4 w-4 shrink-0 text-destructive" />
           <div className="flex-1">
-            <span className="font-medium text-destructive">MongoDB Atlas not reachable.</span>
-            <span className="ml-1 text-muted-foreground">Retrying automatically every few seconds. Make sure 0.0.0.0/0 is whitelisted in Atlas Network Access.</span>
+            <span className="font-medium text-destructive">Database not reachable.</span>
+            <span className="ml-1 text-muted-foreground">Check that DATABASE_URL is set and the PostgreSQL instance is running.</span>
           </div>
           <Button
             variant="ghost" size="sm"
             className="h-7 shrink-0 text-xs"
-            onClick={() => qc.invalidateQueries({ queryKey: ["mongo-status"] })}
+            onClick={() => qc.invalidateQueries({ queryKey: ["db-status"] })}
           >
-            <RefreshCw className="mr-1 h-3 w-3" /> Retry now
+            <RefreshCw className="mr-1 h-3 w-3" /> Retry
           </Button>
         </div>
       )}
@@ -180,12 +180,11 @@ export default function NexusControl() {
             <Input value={newNote} onChange={(e) => setNewNote(e.target.value)}
               placeholder="Note (optional)" className="flex-1 min-w-[160px]"
               onKeyDown={(e) => e.key === "Enter" && handleAdd()} />
-            <Button onClick={handleAdd} disabled={addMutation.isPending || !connected}
+            <Button onClick={handleAdd} disabled={addMutation.isPending}
               className="bg-gradient-to-r from-primary to-accent text-primary-foreground">
               {addMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="mr-1.5 h-4 w-4" /> Add</>}
             </Button>
           </div>
-          {!connected && <p className="mt-2 text-xs text-muted-foreground">Connect to MongoDB to manage users.</p>}
         </CardContent>
       </Card>
 
@@ -205,11 +204,7 @@ export default function NexusControl() {
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
           </div>
 
-          {!connected ? (
-            <div className="rounded-lg border border-dashed border-border/60 py-10 text-center text-sm text-muted-foreground">
-              Waiting for MongoDB connection…
-            </div>
-          ) : listQ.isLoading ? (
+          {listQ.isLoading ? (
             <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
           ) : entries.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/60 py-10 text-center text-sm text-muted-foreground">
@@ -218,7 +213,7 @@ export default function NexusControl() {
           ) : (
             <div className="space-y-1">
               {entries.map((entry: any, i: number) => (
-                <motion.div key={entry._id}
+                <motion.div key={entry.id}
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.03 }}
                   className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/40 px-3 py-2.5 transition hover:border-primary/30">
@@ -234,7 +229,7 @@ export default function NexusControl() {
                   </div>
                   <Button variant="ghost" size="sm"
                     className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => setPendingDelete({ id: entry._id, email: entry.email })}>
+                    onClick={() => setPendingDelete({ id: entry.id, email: entry.email })}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </motion.div>
