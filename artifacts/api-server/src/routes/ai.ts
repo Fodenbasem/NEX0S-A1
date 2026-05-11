@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { aiRequestsTable, projectsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import OpenAI from "openai";
 
@@ -23,7 +23,7 @@ const SYSTEM_PROMPT = `You are NEX0S A1, an expert AI software architect. You he
 When enough information is gathered, produce a structured blueprint with: architecture, tech stack, database schema outline, API endpoints, and deployment strategy.`;
 
 router.post("/ai/stream", requireAuth, async (req, res) => {
-  const userId = (req as any).userId;
+  const { userId } = req;
   const { project_id, message } = req.body;
 
   if (!message?.trim()) {
@@ -31,11 +31,22 @@ router.post("/ai/stream", requireAuth, async (req, res) => {
     return;
   }
 
-  // Load conversation history
+  // If a project_id is given, verify ownership before loading history
+  if (project_id) {
+    const [project] = await db.select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, project_id), eq(projectsTable.ownerId, userId)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+  }
+
+  // Load conversation history scoped to this user's project
   let history: { role: "user" | "assistant"; content: string }[] = [];
   if (project_id) {
     const msgs = await db.select().from(aiRequestsTable)
-      .where(eq(aiRequestsTable.projectId, project_id))
+      .where(and(eq(aiRequestsTable.projectId, project_id), eq(aiRequestsTable.userId, userId)))
       .orderBy(aiRequestsTable.createdAt)
       .limit(40);
     history = msgs.map(m => ({
@@ -57,14 +68,14 @@ router.post("/ai/stream", requireAuth, async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("x-nex0s-model", "gpt-5-mini");
+  res.setHeader("x-nex0s-model", "gpt-4o-mini");
   res.setHeader("x-nex0s-t0", String(t0));
 
   let fullContent = "";
 
   try {
     const stream = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4o-mini",
       max_completion_tokens: 8192,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -91,14 +102,15 @@ router.post("/ai/stream", requireAuth, async (req, res) => {
     if (project_id && fullContent) {
       await db.insert(aiRequestsTable).values({
         projectId: project_id, userId, role: "ai", content: fullContent,
-        model: "gpt-5-mini", tokensIn: null, tokensOut: null, latencyMs,
+        model: "gpt-4o-mini", tokensIn: null, tokensOut: null, latencyMs,
       });
     }
-  } catch (e: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal server error";
     if (!res.headersSent) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: message });
     } else {
-      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       res.end();
     }
   }

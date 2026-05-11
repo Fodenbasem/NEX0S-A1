@@ -76,9 +76,6 @@
   },
   "dependencies": {
     "@clerk/react": "^6.6.2",
-    "@clerk/themes": "^2.4.57",
-    "@supabase/supabase-js": "^2.105.4",
-    "@tanstack/react-router": "^1.169.2",
-    "@tanstack/react-start": "^1.167.65"
+    "@clerk/themes": "^2.4.57"
   }
 }
