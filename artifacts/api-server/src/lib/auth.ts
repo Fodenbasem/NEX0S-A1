@@ -1,6 +1,11 @@
 import { getAuth, clerkClient } from "@clerk/express";
 import type { Request, Response, NextFunction } from "express";
 
+const HARDCODED_ADMINS = [
+  "nexus.admin@gmail.com",
+  "fady.basem347@gmail.com",
+];
+
 const adminEmailCache = new Map<string, { isAdmin: boolean; ts: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -15,17 +20,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
+function isAdminEmail(email: string): boolean {
+  const lower = email.toLowerCase();
+  if (HARDCODED_ADMINS.includes(lower)) return true;
+  const envAdmins = (process.env.ADMIN_EMAIL ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return envAdmins.includes(lower);
+}
+
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const auth = getAuth(req);
   const userId = auth?.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  const adminEmail = process.env.ADMIN_EMAIL;
-  if (!adminEmail) {
-    res.status(403).json({ error: "Admin not configured on server" });
     return;
   }
 
@@ -43,7 +52,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   try {
     const user = await clerkClient.users.getUser(userId);
     const email = user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress ?? "";
-    const isAdmin = email.toLowerCase() === adminEmail.toLowerCase();
+    const isAdmin = isAdminEmail(email);
     adminEmailCache.set(userId, { isAdmin, ts: Date.now() });
 
     if (!isAdmin) {
