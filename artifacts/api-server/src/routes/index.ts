@@ -7,6 +7,8 @@ import deploymentsRouter from "./deployments";
 import activityRouter from "./activity";
 import sessionsRouter from "./sessions";
 import adminRouter from "./admin";
+import whitelistRouter from "./whitelist";
+import synthesisRouter from "./synthesis";
 
 const router: IRouter = Router();
 
@@ -18,5 +20,7 @@ router.use(deploymentsRouter);
 router.use(activityRouter);
 router.use(sessionsRouter);
 router.use(adminRouter);
+router.use(whitelistRouter);
+router.use(synthesisRouter);
 
 export default router;

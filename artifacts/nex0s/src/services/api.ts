@@ -99,7 +99,7 @@ export const api = {
     }
     if (!res.body) throw new Error("No stream body");
 
-    const model = res.headers.get("x-nex0s-model") ?? "gpt-5-mini";
+    const model = res.headers.get("x-nex0s-model") ?? "gemini-2.0-flash";
     const t0 = Number(res.headers.get("x-nex0s-t0")) || Date.now();
 
     const reader = res.body.getReader();
@@ -128,6 +128,53 @@ export const api = {
 
     const latency_ms = Date.now() - t0;
     return { content: full, model, latency_ms };
+  },
+
+  async checkWhitelist(email: string): Promise<boolean> {
+    try {
+      const res = await fetch(apiUrl(`/whitelist/check?email=${encodeURIComponent(email)}`), {
+        credentials: "include",
+      });
+      if (!res.ok) return true;
+      const data = await res.json();
+      return data.allowed;
+    } catch {
+      return true;
+    }
+  },
+
+  async listWhitelist(q?: string): Promise<any[]> {
+    const url = q ? `/whitelist?q=${encodeURIComponent(q)}` : "/whitelist";
+    const res = await apiFetch(url);
+    return res.json();
+  },
+
+  async addToWhitelist(email: string, note?: string): Promise<any> {
+    const res = await apiFetch("/whitelist", { method: "POST", body: JSON.stringify({ email, note }) });
+    return res.json();
+  },
+
+  async removeFromWhitelist(id: string): Promise<void> {
+    await apiFetch(`/whitelist/${id}`, { method: "DELETE" });
+  },
+
+  streamSynthesis(
+    projectId: string,
+    onStage: (event: { type: string; stage?: string; label?: string; progress: number; content?: string }) => void,
+    onDone: () => void,
+    onError: (msg: string) => void,
+  ): () => void {
+    const es = new EventSource(apiUrl(`/synthesis/stream/${projectId}`), { withCredentials: true });
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "done") { onDone(); es.close(); }
+        else if (data.type === "error") { onError(data.message); es.close(); }
+        else onStage(data);
+      } catch { }
+    };
+    es.onerror = () => { onError("Connection lost"); es.close(); };
+    return () => es.close();
   },
 
   async listSecurityReports(projectId?: string) {

@@ -24,8 +24,17 @@ localPort = 8080
 externalPort = 80
 
 [[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
 localPort = 18723
 externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+MONGODB_URI = "mongodb+srv://nex0s_a1:nex0s_a1@cluster0.ccrp1hc.mongodb.net/NEX0S_DB"

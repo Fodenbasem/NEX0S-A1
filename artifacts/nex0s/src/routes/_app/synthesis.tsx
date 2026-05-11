@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Activity, GitBranch, Database as DBIcon, Network } from "lucide-react";
+import { Sparkles, Activity, GitBranch, Database as DBIcon, Network, Play, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { api, type Project } from "@/services/api";
 import { FileTree, buildProjectTree } from "@/components/synthesis/FileTree";
@@ -14,25 +14,26 @@ import { BuildPipeline } from "@/components/synthesis/BuildPipeline";
 import { AITerminal, type TerminalLine } from "@/components/synthesis/AITerminal";
 import { FrontendArchitectureMap, BackendArchitectureMap } from "@/components/synthesis/ArchitectureMap";
 import { SchemaViewer } from "@/components/synthesis/SchemaViewer";
+import { toast } from "sonner";
 
 const fmtTs = (iso: string) => new Date(iso).toLocaleTimeString([], { hour12: false });
 
-function deriveTerminal(project: Project | undefined, aiMsgs: any[]): TerminalLine[] {
-  if (!project) return [];
+function deriveTerminal(project: Project | undefined, aiMsgs: any[], stageLog: TerminalLine[]): TerminalLine[] {
+  if (!project) return stageLog;
   const out: TerminalLine[] = [
     { ts: fmtTs(project.created_at), level: "sys", text: `init project[${project.id.slice(0, 8)}] stack=${project.stack ?? "auto"}` },
     { ts: fmtTs(project.created_at), level: "info", text: `language=${project.language} status=${project.status}` },
   ];
-  aiMsgs.slice(-6).forEach(m => out.push({
+  aiMsgs.slice(-4).forEach(m => out.push({
     ts: fmtTs(m.created_at), level: "ai",
     text: `${m.role === "user" ? "user" : m.model ?? "ai"} :: ${m.content.slice(0, 110)}${m.content.length > 110 ? "…" : ""}`,
   }));
-  out.sort((a, b) => a.ts.localeCompare(b.ts));
-  return out;
+  return [...out, ...stageLog].sort((a, b) => a.ts.localeCompare(b.ts));
 }
 
 export default function Synthesis() {
-  const projectsQ = useQuery({ queryKey: ["projects"], queryFn: api.listProjects, refetchInterval: 8000 });
+  const qc = useQueryClient();
+  const projectsQ = useQuery({ queryKey: ["projects"], queryFn: api.listProjects, refetchInterval: 5000 });
   const projects = projectsQ.data ?? [];
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = useMemo(
@@ -41,21 +42,66 @@ export default function Synthesis() {
   );
   const [selectedFile, setSelectedFile] = useState<string>();
   const [aiMsgs, setAiMsgs] = useState<any[]>([]);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [stageLog, setStageLog] = useState<TerminalLine[]>([]);
+  const [liveProgress, setLiveProgress] = useState<number | null>(null);
+  const closeRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     if (!active) return;
     api.listAIRequests(active.id).then(setAiMsgs).catch(() => {});
   }, [active?.id]);
 
+  useEffect(() => {
+    return () => { closeRef.current?.(); };
+  }, []);
+
+  const startSynthesis = () => {
+    if (!active || synthesizing) return;
+    setSynthesizing(true);
+    setStageLog([]);
+    setLiveProgress(0);
+    toast.info("NEX0S-A1 synthesis pipeline started");
+
+    closeRef.current = api.streamSynthesis(
+      active.id,
+      (event) => {
+        const now = new Date().toLocaleTimeString([], { hour12: false });
+        if (event.type === "stage_start") {
+          setLiveProgress(event.progress);
+          setStageLog(prev => [...prev, { ts: now, level: "sys", text: `▸ ${event.label} · starting…` }]);
+        } else if (event.type === "stage_done") {
+          setLiveProgress(event.progress);
+          setStageLog(prev => [...prev,
+            { ts: now, level: "info", text: `✔ ${event.label} [${event.progress}%]` },
+            ...(event.content ? [{ ts: now, level: "ai" as const, text: event.content.slice(0, 200) + (event.content.length > 200 ? "…" : "") }] : []),
+          ]);
+        }
+      },
+      () => {
+        setSynthesizing(false);
+        setLiveProgress(null);
+        toast.success("Synthesis complete — project deployed");
+        qc.invalidateQueries({ queryKey: ["projects"] });
+      },
+      (msg) => {
+        setSynthesizing(false);
+        setLiveProgress(null);
+        toast.error(`Synthesis failed: ${msg}`);
+      },
+    );
+  };
+
   const tree = useMemo(() => buildProjectTree(active?.stack ?? null), [active?.stack]);
-  const terminal = useMemo(() => deriveTerminal(active, aiMsgs), [active, aiMsgs]);
+  const effectiveProgress = liveProgress !== null ? liveProgress : (active?.synthesis_progress ?? 0);
+  const terminal = useMemo(() => deriveTerminal(active, aiMsgs, stageLog), [active, aiMsgs, stageLog]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Phase 02 · Synthesis Engine"
         title="AI Software Factory"
-        description="Watch NEX0S A1 autonomously synthesize the frontend, backend, schema, security and deployment in real time."
+        description="NEX0S-A1 autonomously synthesizes frontend, backend, schema, security and deployment in 7 live stages."
         actions={
           <Link to="/consultation">
             <Button className="bg-gradient-to-r from-primary to-accent text-primary-foreground glow">
@@ -86,15 +132,28 @@ export default function Synthesis() {
                   </button>
                 ))}
               </div>
-              <Badge variant="outline" className="border-accent/40 bg-accent/10 text-accent">
-                <Activity className="mr-1 h-3 w-3" /> live · polling
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="border-accent/40 bg-accent/10 text-accent">
+                  <Activity className="mr-1 h-3 w-3" /> {synthesizing ? "running" : "ready"}
+                </Badge>
+                <Button
+                  size="sm"
+                  onClick={startSynthesis}
+                  disabled={synthesizing}
+                  className="bg-gradient-to-r from-primary to-accent text-primary-foreground glow"
+                >
+                  {synthesizing
+                    ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Synthesizing…</>
+                    : <><Play className="mr-1.5 h-3.5 w-3.5" /> Start AI Synthesis</>
+                  }
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
           <div className="grid gap-6 lg:grid-cols-5">
-            <div className="lg:col-span-2"><BuildPipeline progress={active.synthesis_progress} status={active.status} /></div>
-            <div className="lg:col-span-3"><AITerminal lines={terminal} streaming={active.status === "synthesizing"} /></div>
+            <div className="lg:col-span-2"><BuildPipeline progress={effectiveProgress} status={synthesizing ? "synthesizing" : active.status} /></div>
+            <div className="lg:col-span-3"><AITerminal lines={terminal} streaming={synthesizing} /></div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-5">
@@ -127,7 +186,7 @@ export default function Synthesis() {
                   <TabsContent value="flow" className="mt-3">
                     <div className="rounded-lg border border-border/40 bg-background/30 p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
-                        {["Request", "Auth Middleware", "Controller", "Service", "Database", "Response"].map((s, i, arr) => (
+                        {["Request", "Auth", "Whitelist Gate", "Controller", "AI Engine", "Database", "Response"].map((s, i, arr) => (
                           <div key={s} className="flex items-center gap-2">
                             <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-primary">{s}</span>
                             {i < arr.length - 1 && <span className="text-accent">›</span>}
@@ -135,8 +194,9 @@ export default function Synthesis() {
                         ))}
                       </div>
                       <div className="mt-3 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
-                        <div>POST /api/projects → verify JWT → enforce RLS → projects.create() → INSERT projects → 201</div>
-                        <div>POST /api/ai/stream → JWT → ai-gateway → SSE stream → INSERT ai_requests</div>
+                        <div>POST /api/projects → Clerk JWT → MongoDB whitelist check → projects.create() → 201</div>
+                        <div>POST /api/ai/stream → JWT → Gemini-2.0-flash (→ OpenRouter fallback) → SSE stream</div>
+                        <div>POST /api/synthesis/stream/:id → 7-stage AI pipeline → progress SSE → deployed</div>
                       </div>
                     </div>
                   </TabsContent>
