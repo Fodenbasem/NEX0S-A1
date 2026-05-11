@@ -158,6 +158,11 @@ export const api = {
     await apiFetch(`/whitelist/${id}`, { method: "DELETE" });
   },
 
+  async getMongoStatus(): Promise<{ connected: boolean; readyState: number; label: string }> {
+    const res = await apiFetch("/status/mongodb");
+    return res.json();
+  },
+
   streamSynthesis(
     projectId: string,
     onStage: (event: { type: string; stage?: string; label?: string; progress: number; content?: string }) => void,

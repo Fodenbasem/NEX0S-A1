@@ -9,6 +9,7 @@ import sessionsRouter from "./sessions";
 import adminRouter from "./admin";
 import whitelistRouter from "./whitelist";
 import synthesisRouter from "./synthesis";
+import statusRouter from "./status";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(sessionsRouter);
 router.use(adminRouter);
 router.use(whitelistRouter);
 router.use(synthesisRouter);
+router.use(statusRouter);
 
 export default router;
