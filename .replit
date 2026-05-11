@@ -38,5 +38,5 @@ channel = "stable-25_05"
 
 [userenv.shared]
 MONGODB_URI = "mongodb+srv://nex0s_a1:nex0s_a1@cluster0.ccrp1hc.mongodb.net/NEX0S_DB"
-ADMIN_EMAIL = "admin@nexus.a1"
+ADMIN_EMAIL = "nexus.admin@gmail.com"
 GEMINI_API_KEY = "AIzaSyCOqPgDxB9whU5GIC2zYTUIyo3omVlv8PQ"
