@@ -8,18 +8,19 @@ import OpenAI from "openai";
 
 const router = Router();
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? "");
+function getGeminiKey(): string {
+  return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? "";
+}
 
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENAI_API_KEY ?? "",
-});
+function getOpenRouterKey(): string {
+  return process.env.OPENAI_API_KEY ?? "";
+}
 
 const SYSTEM_PROMPT = `You are NEX0S-A1, an expert AI software architect. You help users design and plan software projects through structured consultation. You:
 - Ask focused, clarifying questions to understand requirements
 - Suggest appropriate technology stacks
 - Create structured technical blueprints
-- Support both English and Arabic
+- Support both English and Arabic (respond in the same language the user uses)
 - Are concise but thorough
 - Focus on production-ready, scalable architecture
 
@@ -30,6 +31,7 @@ async function streamGemini(
   userMessage: string,
   onToken: (t: string) => void,
 ): Promise<{ content: string; model: string }> {
+  const genAI = new GoogleGenerativeAI(getGeminiKey());
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const chat = model.startChat({
     history: [
@@ -52,7 +54,15 @@ async function streamOpenRouter(
   userMessage: string,
   onToken: (t: string) => void,
 ): Promise<{ content: string; model: string }> {
-  const modelId = "google/gemini-2.0-flash-exp:free";
+  const openrouter = new OpenAI({
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: getOpenRouterKey(),
+    defaultHeaders: {
+      "HTTP-Referer": "https://nex0s-a1.replit.app",
+      "X-Title": "NEX0S-A1",
+    },
+  });
+  const modelId = "openai/gpt-4o-mini";
   const stream = await openrouter.chat.completions.create({
     model: modelId,
     messages: [
@@ -68,6 +78,37 @@ async function streamOpenRouter(
     if (delta) { full += delta; onToken(delta); }
   }
   return { content: full, model: modelId };
+}
+
+async function streamAI(
+  history: { role: "user" | "model"; parts: { text: string }[] }[],
+  orHistory: { role: "user" | "assistant"; content: string }[],
+  userMessage: string,
+  onToken: (t: string) => void,
+): Promise<{ content: string; model: string }> {
+  const geminiKey = getGeminiKey();
+  const openrouterKey = getOpenRouterKey();
+
+  if (geminiKey) {
+    try {
+      return await streamGemini(history, userMessage, onToken);
+    } catch (geminiErr) {
+      const msg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+      console.warn("[ai] Gemini failed, trying OpenRouter:", msg.slice(0, 120));
+    }
+  }
+
+  if (openrouterKey) {
+    try {
+      return await streamOpenRouter(orHistory, userMessage, onToken);
+    } catch (orErr) {
+      const msg = orErr instanceof Error ? orErr.message : String(orErr);
+      console.error("[ai] OpenRouter also failed:", msg.slice(0, 120));
+      throw new Error("All AI providers failed. Check API keys and quota.");
+    }
+  }
+
+  throw new Error("No AI provider available — set GEMINI_API_KEY or OPENAI_API_KEY");
 }
 
 router.post("/ai/stream", requireAuth, async (req, res) => {
@@ -115,40 +156,19 @@ router.post("/ai/stream", requireAuth, async (req, res) => {
   };
 
   try {
-    if (process.env.GOOGLE_API_KEY) {
-      try {
-        const history = rawMsgs.map(m => ({
-          role: (m.role === "ai" ? "model" : "user") as "user" | "model",
-          parts: [{ text: m.content }],
-        }));
-        const r = await streamGemini(history, message.trim(), onToken);
-        finalModel = r.model;
-      } catch (geminiErr) {
-        console.warn("[ai] Gemini failed, falling back to OpenRouter:", geminiErr);
-        if (process.env.OPENAI_API_KEY) {
-          const history = rawMsgs.map(m => ({
-            role: (m.role === "ai" ? "assistant" : "user") as "user" | "assistant",
-            content: m.content,
-          }));
-          const r = await streamOpenRouter(history, message.trim(), onToken);
-          finalModel = r.model;
-        } else {
-          throw geminiErr;
-        }
-      }
-    } else if (process.env.OPENAI_API_KEY) {
-      const history = rawMsgs.map(m => ({
-        role: (m.role === "ai" ? "assistant" : "user") as "user" | "assistant",
-        content: m.content,
-      }));
-      const r = await streamOpenRouter(history, message.trim(), onToken);
-      finalModel = r.model;
-    } else {
-      throw new Error("No AI API key configured (GOOGLE_API_KEY or OPENAI_API_KEY)");
-    }
+    const geminiHistory = rawMsgs.map(m => ({
+      role: (m.role === "ai" ? "model" : "user") as "user" | "model",
+      parts: [{ text: m.content }],
+    }));
+    const orHistory = rawMsgs.map(m => ({
+      role: (m.role === "ai" ? "assistant" : "user") as "user" | "assistant",
+      content: m.content,
+    }));
 
-    res.setHeader("x-nex0s-model", finalModel);
-    res.setHeader("x-nex0s-t0", String(t0));
+    const result = await streamAI(geminiHistory, orHistory, message.trim(), onToken);
+    finalModel = result.model;
+    finalContent = result.content;
+
     res.write("data: [DONE]\n\n");
     res.end();
 
@@ -160,11 +180,12 @@ router.post("/ai/stream", requireAuth, async (req, res) => {
       });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "AI gateway error";
+    const errMessage = err instanceof Error ? err.message : "AI gateway error";
     if (!res.headersSent) {
-      res.status(500).json({ error: message });
+      res.status(500).json({ error: errMessage });
     } else {
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: errMessage })}\n\n`);
+      res.write("data: [DONE]\n\n");
       res.end();
     }
   }

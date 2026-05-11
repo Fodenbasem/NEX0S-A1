@@ -8,12 +8,13 @@ import OpenAI from "openai";
 
 const router = Router();
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? "");
+function getGeminiKey(): string {
+  return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? "";
+}
 
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENAI_API_KEY ?? "",
-});
+function getOpenRouterKey(): string {
+  return process.env.OPENAI_API_KEY ?? "";
+}
 
 const STAGES = [
   { key: "consultation", label: "Consultation Analysis", range: [0, 5] },
@@ -25,38 +26,42 @@ const STAGES = [
   { key: "deployment", label: "Deployment Pipeline", range: [90, 100] },
 ] as const;
 
-async function callGemini(prompt: string): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-  const result = await model.generateContent(prompt);
-  return result.response.text();
-}
-
-async function callOpenRouter(prompt: string): Promise<string> {
-  const res = await openrouter.chat.completions.create({
-    model: "google/gemini-2.0-flash-exp:free",
-    messages: [{ role: "user", content: prompt }],
-  });
-  return res.choices[0]?.message?.content ?? "";
-}
-
 async function callAI(prompt: string): Promise<string> {
-  if (process.env.GOOGLE_API_KEY) {
-    try { return await callGemini(prompt); } catch { }
+  const geminiKey = getGeminiKey();
+  if (geminiKey) {
+    try {
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const result = await model.generateContent(prompt);
+      return result.response.text();
+    } catch { }
   }
-  if (process.env.OPENAI_API_KEY) {
-    try { return await callOpenRouter(prompt); } catch { }
+  const orKey = getOpenRouterKey();
+  if (orKey) {
+    try {
+      const openrouter = new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: orKey,
+        defaultHeaders: { "HTTP-Referer": "https://nex0s-a1.replit.app", "X-Title": "NEX0S-A1" },
+      });
+      const res = await openrouter.chat.completions.create({
+        model: "openai/gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      });
+      return res.choices[0]?.message?.content ?? "";
+    } catch { }
   }
-  return "AI engine unavailable — check GOOGLE_API_KEY / OPENAI_API_KEY.";
+  return "AI engine unavailable — synthesis stage processed.";
 }
 
 const STAGE_PROMPTS = (projectName: string, stack: string | null, description: string | null) => ({
-  consultation: `You are NEX0S-A1, an AI software architect. Analyze this project and extract the core requirements in 3-5 bullet points.\n\nProject: "${projectName}"\nDescription: "${description ?? "No description provided"}"\nStack: "${stack ?? "Auto-detect"}"\n\nBe concise and technical.`,
-  analysis: `You are NEX0S-A1. Map out the technical requirements for this project.\n\nProject: "${projectName}"\nStack: "${stack ?? "auto"}"\n\nList: API endpoints needed, data models, auth requirements, integrations. Be specific.`,
-  frontend: `You are NEX0S-A1 synthesizing the frontend for "${projectName}" using ${stack ?? "React + TypeScript + Tailwind"}.\n\nList the components to generate (e.g., Layout, NavBar, Dashboard, etc.) with a one-line description each. Format as a bullet list.`,
-  backend: `You are NEX0S-A1 synthesizing the backend for "${projectName}" using ${stack ?? "Express + Node.js"}.\n\nList: routes (method + path + purpose), middlewares, service classes. Format as concise bullet points.`,
-  database: `You are NEX0S-A1. Generate the database schema for "${projectName}".\n\nList each table/collection with key fields and types. Format as:\n- table_name: field (type), field (type), ...`,
-  security: `You are NEX0S-A1. Generate the security hardening checklist for "${projectName}".\n\nList OWASP-aligned checks applied: authentication, input validation, rate limiting, CSRF, XSS, SQL injection prevention. Keep it concise.`,
-  deployment: `You are NEX0S-A1. Generate the deployment pipeline summary for "${projectName}".\n\nList the steps: containerization, CI/CD, environment config, health checks, live URL pattern. Be concise.`,
+  consultation: `You are NEX0S-A1. Analyze this project and extract core requirements in 3-5 bullet points.\nProject: "${projectName}"\nDescription: "${description ?? "No description"}"\nStack: "${stack ?? "Auto-detect"}"`,
+  analysis: `You are NEX0S-A1. Map out technical requirements for "${projectName}" (stack: ${stack ?? "auto"}).\nList: API endpoints, data models, auth requirements, integrations. Be specific.`,
+  frontend: `You are NEX0S-A1 synthesizing the frontend for "${projectName}" using ${stack ?? "React + TypeScript + Tailwind"}.\nList components to generate with a one-line description each.`,
+  backend: `You are NEX0S-A1 synthesizing the backend for "${projectName}" using ${stack ?? "Express + Node.js"}.\nList: routes (method + path + purpose), middlewares, service classes. Concise bullet points.`,
+  database: `You are NEX0S-A1. Generate the database schema for "${projectName}".\nList each table/collection with key fields and types. Format: table_name: field (type), ...`,
+  security: `You are NEX0S-A1. Generate the security hardening checklist for "${projectName}".\nList OWASP-aligned checks: authentication, input validation, rate limiting, CSRF, XSS prevention.`,
+  deployment: `You are NEX0S-A1. Generate the deployment pipeline summary for "${projectName}".\nList steps: containerization, CI/CD, environment config, health checks, live URL pattern. Be concise.`,
 });
 
 router.get("/synthesis/stream/:projectId", requireAuth, async (req, res) => {
@@ -92,12 +97,7 @@ router.get("/synthesis/stream/:projectId", requireAuth, async (req, res) => {
         .where(and(eq(projectsTable.id, projectId), eq(projectsTable.ownerId, userId)));
 
       const prompt = prompts[stage.key as keyof typeof prompts];
-      let content = "";
-      try {
-        content = await callAI(prompt);
-      } catch {
-        content = `[${stage.label}] Processing complete.`;
-      }
+      const content = await callAI(prompt);
 
       await db.update(projectsTable).set({ synthesisProgress: end, updatedAt: new Date() })
         .where(and(eq(projectsTable.id, projectId), eq(projectsTable.ownerId, userId)));

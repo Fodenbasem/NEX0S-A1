@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Shield, Plus, Trash2, Search, ShieldCheck, AlertTriangle, Loader2, Users } from "lucide-react";
+import { Shield, Plus, Trash2, Search, ShieldCheck, Loader2, Users, ShieldX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,35 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
 import { api } from "@/services/api";
 import { toast } from "sonner";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+function AccessDenied() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6 text-center">
+      <div className="h-16 w-16 rounded-2xl bg-destructive/10 border border-destructive/30 flex items-center justify-center">
+        <ShieldX className="h-8 w-8 text-destructive" />
+      </div>
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-destructive mb-2">403 Forbidden</div>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Admin Access Required</h1>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto">
+          Nexus Control is restricted to the master admin account. Contact your system administrator.
+        </p>
+      </div>
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 font-mono text-[11px] text-left space-y-1">
+        <div><span className="text-destructive">✗</span> route: <span className="text-foreground">/admin/nexus-control</span></div>
+        <div><span className="text-destructive">✗</span> access: <span className="text-destructive">DENIED</span></div>
+      </div>
+    </div>
+  );
+}
+
 export default function NexusControl() {
+  const isAdmin = useIsAdmin();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -24,6 +47,7 @@ export default function NexusControl() {
   const listQ = useQuery({
     queryKey: ["whitelist", search],
     queryFn: () => api.listWhitelist(search || undefined),
+    enabled: isAdmin,
     refetchInterval: 15_000,
   });
 
@@ -48,6 +72,8 @@ export default function NexusControl() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  if (!isAdmin) return <AccessDenied />;
+
   const handleAdd = () => {
     if (!newEmail.trim() || !newEmail.includes("@")) {
       toast.error("Enter a valid email address");
@@ -66,7 +92,7 @@ export default function NexusControl() {
         description="Control access to NEX0S-A1. Only whitelisted users can enter the AI synthesis console after authentication."
         actions={
           <Badge variant="outline" className="border-destructive/40 bg-destructive/10 text-destructive">
-            <Shield className="mr-1.5 h-3 w-3" /> Restricted Access
+            <Shield className="mr-1.5 h-3 w-3" /> Master Admin Only
           </Badge>
         }
       />
@@ -74,8 +100,8 @@ export default function NexusControl() {
       <div className="grid gap-4 sm:grid-cols-3">
         {[
           { label: "Whitelisted Users", value: entries.length, icon: ShieldCheck, color: "text-success" },
-          { label: "MongoDB Status", value: "Connected", icon: AlertTriangle, color: "text-primary" },
-          { label: "Access Gate", value: "Active", icon: Shield, color: "text-accent" },
+          { label: "MongoDB Status", value: listQ.isError ? "Disconnected" : "Active", icon: Shield, color: listQ.isError ? "text-destructive" : "text-primary" },
+          { label: "Access Gate", value: "Enforced", icon: ShieldX, color: "text-accent" },
         ].map((s) => (
           <Card key={s.label} className="glass">
             <CardContent className="p-4">
@@ -141,6 +167,10 @@ export default function NexusControl() {
 
           {listQ.isLoading ? (
             <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+          ) : listQ.isError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-destructive">
+              MongoDB Atlas not connected — whitelist unavailable. Whitelist 0.0.0.0/0 in Atlas Network Access.
+            </div>
           ) : entries.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/60 py-10 text-center text-sm text-muted-foreground">
               {search ? "No users match the search." : "No whitelisted users yet. Add one above."}
@@ -162,9 +192,7 @@ export default function NexusControl() {
                     <div className="truncate font-medium text-sm">{entry.email}</div>
                     <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                       {entry.note && <span className="truncate">{entry.note}</span>}
-                      <span className="font-mono">
-                        {new Date(entry.createdAt).toLocaleDateString()}
-                      </span>
+                      <span className="font-mono">{new Date(entry.createdAt).toLocaleDateString()}</span>
                     </div>
                   </div>
                   <Button

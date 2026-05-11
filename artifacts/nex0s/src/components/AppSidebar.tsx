@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/context/AuthContext";
 import { useUser } from "@clerk/react";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 
 const workspace = [
   { title: "Dashboard",    url: "/dashboard",    icon: LayoutDashboard },
@@ -36,6 +37,7 @@ export function AppSidebar() {
   const [path] = useLocation();
   const { signOut } = useAuth();
   const { user } = useUser();
+  const isAdmin = useIsAdmin();
 
   const renderItem = (item: { title: string; url: string; icon: any }) => {
     const active = path === item.url;
@@ -86,12 +88,14 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Admin</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>{adminLinks.map(renderItem)}</SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{adminLinks.map(renderItem)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
@@ -101,6 +105,11 @@ export function AppSidebar() {
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <User className="h-3.5 w-3.5" />
                 <span className="truncate">{user.primaryEmailAddress?.emailAddress ?? user.fullName ?? "User"}</span>
+                {isAdmin && (
+                  <span className="ml-auto shrink-0 rounded px-1 py-0.5 font-mono text-[9px] bg-primary/10 text-primary border border-primary/20">
+                    ADMIN
+                  </span>
+                )}
               </div>
             )}
             <button
@@ -114,7 +123,6 @@ export function AppSidebar() {
               <span className="h-1.5 w-1.5 rounded-full bg-success pulse-glow" />
               <span>NEX0S-A1 NOMINAL</span>
             </div>
-            <div className="font-mono text-[10px] opacity-70 text-muted-foreground">uptime 99.998%</div>
           </div>
         )}
         {collapsed && (

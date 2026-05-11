@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, requireAdmin } from "../lib/auth";
 import { WhitelistedUser } from "../models/WhitelistedUser";
+import { isMongoConnected } from "../lib/mongodb";
 
 const router = Router();
 
@@ -12,24 +13,32 @@ router.get("/whitelist/check", async (req, res) => {
       res.json({ allowed: false, reason: "unauthenticated" });
       return;
     }
-    const email = (req.query.email as string | undefined)?.toLowerCase().trim();
-    if (!email) {
-      res.json({ allowed: false, reason: "no_email" });
+    if (!isMongoConnected()) {
+      res.json({ allowed: true, reason: "mongo_unavailable" });
       return;
     }
-    const entry = await WhitelistedUser.findOne({ email });
+    const email = (req.query.email as string | undefined)?.toLowerCase().trim();
+    if (!email) {
+      res.json({ allowed: true, reason: "no_email" });
+      return;
+    }
+    const entry = await WhitelistedUser.findOne({ email }).maxTimeMS(3000);
     res.json({ allowed: !!entry });
   } catch (err) {
-    console.error("[whitelist.check]", err);
+    console.error("[whitelist.check]", err instanceof Error ? err.message : err);
     res.json({ allowed: true });
   }
 });
 
-router.get("/whitelist", requireAuth, async (req, res) => {
+router.get("/whitelist", requireAdmin, async (req, res) => {
+  if (!isMongoConnected()) {
+    res.status(503).json({ error: "MongoDB not connected — whitelist unavailable" });
+    return;
+  }
   try {
     const { q } = req.query as Record<string, string>;
     const filter = q ? { email: { $regex: q, $options: "i" } } : {};
-    const users = await WhitelistedUser.find(filter).sort({ createdAt: -1 }).limit(200);
+    const users = await WhitelistedUser.find(filter).sort({ createdAt: -1 }).limit(200).maxTimeMS(5000);
     res.json(users);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
@@ -37,7 +46,11 @@ router.get("/whitelist", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/whitelist", requireAuth, async (req, res) => {
+router.post("/whitelist", requireAdmin, async (req, res) => {
+  if (!isMongoConnected()) {
+    res.status(503).json({ error: "MongoDB not connected" });
+    return;
+  }
   try {
     const { email, note } = req.body as { email: string; note?: string };
     if (!email?.trim()) {
@@ -56,7 +69,11 @@ router.post("/whitelist", requireAuth, async (req, res) => {
   }
 });
 
-router.delete("/whitelist/:id", requireAuth, async (req, res) => {
+router.delete("/whitelist/:id", requireAdmin, async (req, res) => {
+  if (!isMongoConnected()) {
+    res.status(503).json({ error: "MongoDB not connected" });
+    return;
+  }
   try {
     await WhitelistedUser.findByIdAndDelete(req.params.id);
     res.json({ ok: true });

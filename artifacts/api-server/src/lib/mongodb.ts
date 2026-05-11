@@ -1,21 +1,34 @@
 import mongoose from "mongoose";
 
-let connected = false;
+let connectPromise: Promise<void> | null = null;
 
 export async function connectMongo(): Promise<void> {
-  if (connected || mongoose.connection.readyState === 1) return;
+  if (mongoose.connection.readyState === 1) return;
+  if (connectPromise) return connectPromise;
+
   const uri = process.env.MONGODB_URI;
   if (!uri) {
     console.warn("[mongodb] MONGODB_URI not set — whitelist features disabled");
     return;
   }
-  try {
-    await mongoose.connect(uri, { dbName: "NEX0S_DB" });
-    connected = true;
+
+  connectPromise = mongoose.connect(uri, {
+    dbName: "NEX0S_DB",
+    serverSelectionTimeoutMS: 5000,
+    connectTimeoutMS: 5000,
+    socketTimeoutMS: 5000,
+  }).then(() => {
     console.info("[mongodb] Connected to NEX0S_DB");
-  } catch (err) {
-    console.error("[mongodb] Connection failed:", err);
-  }
+  }).catch((err) => {
+    console.warn("[mongodb] Connection failed (whitelist will fail-open):", err?.message ?? err);
+    connectPromise = null;
+  });
+
+  return connectPromise;
+}
+
+export function isMongoConnected(): boolean {
+  return mongoose.connection.readyState === 1;
 }
 
 export { mongoose };
