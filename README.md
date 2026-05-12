@@ -1,6 +1,6 @@
 # NEX0S-A1: SECURITY & RELIABILITY FRAMEWORK (SRF)
 
-![NEX0S-A1 Banner](https://googleusercontent.com/image_generation_content/0)
+![NEX0S-A1 Banner](SRS/Logo_without_Background-removebg-preview.png)
 
 ## 🛡️ Project Overview
 **NEX0S-A1** is a high-performance Artificial Intelligence framework specialized in **Red Teaming** and **Cybersecurity Synthesis**. Built by **SilentN0va**, this project integrates advanced AI capabilities with a robust security architecture to provide a secure environment for offensive security research and automated tool development.
