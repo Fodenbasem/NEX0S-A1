@@ -46,4 +46,4 @@ The system maintains a real-time **Audit Log** within the Nexus Control panel, t
 
 ---
 **Developed and Maintained by [SilentN0va]**
-*AI Cybersecurity Student @ Egyptian Russian University*
+*AI Cybersecurity Student @ Egyptian Russian University and AI Team*
